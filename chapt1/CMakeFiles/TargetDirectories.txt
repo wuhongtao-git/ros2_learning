@@ -1,0 +1,3 @@
+/home/wht/code/chapt1/CMakeFiles/learn_make.dir
+/home/wht/code/chapt1/CMakeFiles/edit_cache.dir
+/home/wht/code/chapt1/CMakeFiles/rebuild_cache.dir
