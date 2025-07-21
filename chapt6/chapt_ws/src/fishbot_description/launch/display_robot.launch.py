@@ -33,7 +33,7 @@ def generate_launch_description():
     # 创建机器人描述
     # 使用Command读取URDF文件
     robot_description = ParameterValue(
-        Command(['cat ', LaunchConfiguration('model')]),
+        Command(['xacro ', LaunchConfiguration('model')]),
         value_type=str
     )
 
