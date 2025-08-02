@@ -2,6 +2,9 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
     <xacro:include filename="$(find fishbot_description)/urdf/fishbot/common_inertia.xacro" />
     <xacro:macro name="camera_xacro" params="xyz">
+        <gazebo reference="camera_link">
+            <material>Gazebo/Red</material>
+        </gazebo>
         <link name="camera_link">
             <visual>
                 <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
