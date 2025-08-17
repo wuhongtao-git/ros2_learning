@@ -10,13 +10,18 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(nav2_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+
+
 
 add_executable(patrol_node
   src/patrol_node.cpp
 )
 
 ament_target_dependencies(patrol_node 
-rclcpp rclcpp_action geometry_msgs)
+rclcpp rclcpp_action geometry_msgs tf2_geometry_msgs nav2_msgs tf2_ros)
 
 install(TARGETS patrol_node
         DESTINATION lib/${PROJECT_NAME}
