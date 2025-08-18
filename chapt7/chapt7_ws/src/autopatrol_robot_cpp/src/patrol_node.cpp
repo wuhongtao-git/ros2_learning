@@ -8,6 +8,9 @@
 #include "tf2_ros/transform_listener.h"
 #include <chrono>
 #include <vector>
+#include <thread>
+#include <atomic>
+#include <future>
 
 using namespace std::chrono_literals;
 
@@ -24,7 +27,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "这是自动巡航节点！");
 
         this->declare_parameter<std::vector<double>>("initial_point", std::vector<double>{0.0, 0.0, 0.0});
-        this->declare_parameter<std::vector<double>>("target_points", std::vector<double>{0.0, 0.0, 0.0, 1.0, 1.0, 1.57});
+        this->declare_parameter<std::vector<double>>("target_points", std::vector<double>{0.0, 0.0, 0.0, 0.0, 1.0, 1.57});
         
         this->initial_point_ = this->get_parameter("initial_point").as_double_array();
         this->target_points_ = this->get_parameter("target_points").as_double_array();
@@ -36,6 +39,14 @@ public:
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     
         initRobotPose();
+
+        patrol_thread_ = std::thread(&PatrolNode::patrolLoop, this);
+    }
+
+    ~PatrolNode() {
+        if (patrol_thread_.joinable()) {
+            patrol_thread_.join();
+        }
     }
 private:
 
@@ -45,7 +56,8 @@ private:
 
         PoseWithCovarianceStamped msg;
         msg.header.frame_id = "map";
-        msg.header.stamp = this->now();
+        //msg.header.stamp = this->now();
+        msg.header.stamp = rclcpp::Time(0);
         msg.pose.pose = pose.pose;
 
         msg.pose.covariance[0] = 0.25;
@@ -105,22 +117,26 @@ private:
             switch(result.code){
                 case rclcpp_action::ResultCode::SUCCEEDED:
                     RCLCPP_INFO(this->get_logger(), "成功到达目标点");
+                    navigation_complete_ = true;
                     break;
                 case rclcpp_action::ResultCode::ABORTED:
                     RCLCPP_ERROR(this->get_logger(), "导航失败");
+                    navigation_complete_ = true;
                     break;
                 case rclcpp_action::ResultCode::CANCELED:
                     RCLCPP_WARN(this->get_logger(), "导航被取消");
+                    navigation_complete_ = true;
                     break;
                 default:
                     RCLCPP_ERROR(this->get_logger(), "未知结果");
+                    navigation_complete_ = true;
                     break;
             }
         };
 
-        auto future_goal_handle = nav_action_client_->async_send_goal(goal_msg, send_goal_options);
+        nav_action_client_->async_send_goal(goal_msg, send_goal_options);
         
-        auto goal_handle = future_goal_handle.get();
+        /*auto goal_handle = future_goal_handle.get();
         if(!goal_handle){
             RCLCPP_ERROR(this->get_logger(), "导航目标被拒绝");
             return;
@@ -142,7 +158,7 @@ private:
             default:
                 RCLCPP_ERROR(this->get_logger(), "导航失败");
                 break;
-        }
+        }*/
     
     }
     Transform getCurrentPose(){
@@ -156,13 +172,51 @@ private:
             return Transform();
         }
     }
+    void patrolLoop(){
+        RCLCPP_INFO(this->get_logger(), "启动巡航线程");
+        while(!nav_action_client_->wait_for_action_server(1s) && rclcpp::ok()){
+            RCLCPP_INFO(this->get_logger(), "等待导航服务器");
+            if(!rclcpp::ok())
+                return;
+        }
+
+        if(!rclcpp::ok())
+            return;
+
+        auto points = getTargetPoints();
+        while(rclcpp::ok()){
+            for(auto & point : points){
+                double x = point[0];
+                double y = point[1];
+                double yaw = point[2];
+
+                auto target_pose = getPoseByXYYaw(x, y, yaw);
+
+                navigation_complete_ = false;
+
+                navigateToPose(target_pose);
+
+                while(rclcpp::ok() && !navigation_complete_){
+                    std::this_thread::sleep_for(100ms);
+                }
+
+                rclcpp::sleep_for(1s);
+
+            }
+
+            rclcpp::sleep_for(5s);
+        }
+    }
+
     std::vector<double> initial_point_;
     std::vector<double> target_points_;
     rclcpp::Publisher<PoseWithCovarianceStamped>::SharedPtr initial_pose_pub_;
     rclcpp_action::Client<NavigateToPose>::SharedPtr nav_action_client_;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-
+    std::thread patrol_thread_;
+    std::atomic<bool> navigation_complete_{false};
+    rclcpp_action::ClientGoalHandle<NavigateToPose>::SharedPtr goal_handle_;
 };
 
 int main(int argc, char** argv){
