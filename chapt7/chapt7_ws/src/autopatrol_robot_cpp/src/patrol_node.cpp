@@ -6,6 +6,7 @@
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
+#include "rosgraph_msgs/msg/clock.hpp"
 #include <chrono>
 #include <vector>
 #include <thread>
@@ -19,6 +20,8 @@ using Transform = geometry_msgs::msg::Transform;
 using PoseWithCovarianceStamped = geometry_msgs::msg::PoseWithCovarianceStamped;
 using NavigateToPose = nav2_msgs::action::NavigateToPose;
 using GoalHandleNavigate = rclcpp_action::ClientGoalHandle<NavigateToPose>;
+using Clock = rosgraph_msgs::msg::Clock;
+
 
 
 class PatrolNode : public rclcpp::Node{
@@ -37,10 +40,24 @@ public:
     
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    
-        initRobotPose();
 
-        patrol_thread_ = std::thread(&PatrolNode::patrolLoop, this);
+
+        rclcpp::QoS clock_qos(rclcpp::KeepLast(10));
+        clock_qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT); // 匹配发布者
+        clock_subsctition_ = this->create_subscription<Clock>("/clock", clock_qos, 
+            [this](const Clock::SharedPtr clock){
+                RCLCPP_INFO(this->get_logger(), "sec = %d, nanosec = %d", clock->clock.sec, clock->clock.nanosec);
+                if(clock->clock.sec != 0)
+                {
+                    this->clock_subsctition_.reset();
+                    this->clock_.clock = clock->clock;
+                    initRobotPose();
+                    patrol_thread_ = std::thread(&PatrolNode::patrolLoop, this);
+                }
+                    
+            }
+        );
+        
     }
 
     ~PatrolNode() {
@@ -50,14 +67,27 @@ public:
     }
 private:
 
+
     void initRobotPose(){
+        // int times = 5;
+        // while(this->clock_.clock.sec == 0 && times--)
+        // {
+        //     RCLCPP_INFO(this->get_logger(), "sec = %d, nanosec = %d", this->clock_.clock.sec, this->clock_.clock.nanosec);
+        //     rclcpp::sleep_for(1s);
+        // }
+
+
+        RCLCPP_INFO(this->get_logger(), "sec = %d, nanosec = %d", this->clock_.clock.sec, this->clock_.clock.nanosec);
+
         auto pose = getPoseByXYYaw(initial_point_[0], initial_point_[1], initial_point_[2]);
         
 
         PoseWithCovarianceStamped msg;
         msg.header.frame_id = "map";
         //msg.header.stamp = this->now();
-        msg.header.stamp = rclcpp::Time(0);
+        //msg.header.stamp = rclcpp::Time(0);
+        msg.header.stamp = this->clock_.clock;
+
         msg.pose.pose = pose.pose;
 
         msg.pose.covariance[0] = 0.25;
@@ -104,7 +134,7 @@ private:
         auto send_goal_options = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
         send_goal_options.goal_response_callback = [this](const GoalHandleNavigate::SharedPtr &goal_handle){
             if(!goal_handle){
-                RCLCPP_ERROR(this->get_logger(), "目标被拒绝");
+                RCLCPP_ERROR(this->get_logger(), "目标被拒绝");//被拒绝为什么就停下来了，应该继续
             }
             else{
                 RCLCPP_INFO(this->get_logger(), "目标已接受");
@@ -136,29 +166,6 @@ private:
 
         nav_action_client_->async_send_goal(goal_msg, send_goal_options);
         
-        /*auto goal_handle = future_goal_handle.get();
-        if(!goal_handle){
-            RCLCPP_ERROR(this->get_logger(), "导航目标被拒绝");
-            return;
-        }
-        auto result_future = nav_action_client_->async_get_result(goal_handle);
-        auto result = rclcpp::spin_until_future_complete(this->get_node_base_interface(), result_future);
-        
-        if(result != rclcpp::FutureReturnCode::SUCCESS){
-            RCLCPP_ERROR(this->get_logger(), "导航过程失败");
-            return;
-        }
-    
-        auto wrapped_result = result_future.get();
-
-        switch(wrapped_result.code){
-            case rclcpp_action::ResultCode::SUCCEEDED:
-                RCLCPP_INFO(this->get_logger(), "导航成功完成");
-                break;
-            default:
-                RCLCPP_ERROR(this->get_logger(), "导航失败");
-                break;
-        }*/
     
     }
     Transform getCurrentPose(){
@@ -217,6 +224,8 @@ private:
     std::thread patrol_thread_;
     std::atomic<bool> navigation_complete_{false};
     rclcpp_action::ClientGoalHandle<NavigateToPose>::SharedPtr goal_handle_;
+    rclcpp::Subscription<Clock>::SharedPtr clock_subsctition_;
+    Clock clock_{};
 };
 
 int main(int argc, char** argv){
