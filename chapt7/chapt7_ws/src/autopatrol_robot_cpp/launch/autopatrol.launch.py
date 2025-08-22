@@ -18,6 +18,14 @@ def generate_launch_description():
         output='screen'
     )
     
+    speaker_node = Node(
+        package='autopatrol_robot_cpp',
+        executable='speaker_node',
+        name='speaker_node',
+        output='screen'
+    )
+    
     return LaunchDescription([
         patrol_node,
+        speaker_node
     ])
