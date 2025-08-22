@@ -7,6 +7,7 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 #include "rosgraph_msgs/msg/clock.hpp"
+#include "autopatrol_interfaces/srv/speech_text.hpp"
 #include <chrono>
 #include <vector>
 #include <thread>
@@ -21,6 +22,7 @@ using PoseWithCovarianceStamped = geometry_msgs::msg::PoseWithCovarianceStamped;
 using NavigateToPose = nav2_msgs::action::NavigateToPose;
 using GoalHandleNavigate = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 using Clock = rosgraph_msgs::msg::Clock;
+using SpeechText = autopatrol_interfaces::srv::SpeechText;
 
 
 
@@ -41,6 +43,7 @@ public:
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+        speech_client_ = this->create_client<SpeechText>("speech_text");
 
         rclcpp::QoS clock_qos(rclcpp::KeepLast(10));
         clock_qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT); // 匹配发布者
@@ -52,6 +55,7 @@ public:
                     this->clock_subsctition_.reset();
                     this->clock_.clock = clock->clock;
                     initRobotPose();
+                    rclcpp::sleep_for(3s);
                     patrol_thread_ = std::thread(&PatrolNode::patrolLoop, this);
                 }
                     
@@ -75,7 +79,7 @@ private:
         //     RCLCPP_INFO(this->get_logger(), "sec = %d, nanosec = %d", this->clock_.clock.sec, this->clock_.clock.nanosec);
         //     rclcpp::sleep_for(1s);
         // }
-
+        speechText("正在初始化位置");
 
         RCLCPP_INFO(this->get_logger(), "sec = %d, nanosec = %d", this->clock_.clock.sec, this->clock_.clock.nanosec);
 
@@ -134,7 +138,7 @@ private:
         auto send_goal_options = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
         send_goal_options.goal_response_callback = [this](const GoalHandleNavigate::SharedPtr &goal_handle){
             if(!goal_handle){
-                RCLCPP_ERROR(this->get_logger(), "目标被拒绝");//被拒绝为什么就停下来了，应该继续
+                RCLCPP_ERROR(this->get_logger(), "目标被拒绝");//被拒绝为什么就停下来了，应该继续。还是有可能失败，失败了需要重试
             }
             else{
                 RCLCPP_INFO(this->get_logger(), "目标已接受");
@@ -201,7 +205,13 @@ private:
 
                 navigation_complete_ = false;
 
+                char text[128] = {0};
+                snprintf(text, sizeof(text), "正在前往目标点：%.2f, %.2f", x, y);
+                speechText(text);
+
                 navigateToPose(target_pose);
+
+                speechText("目标点已到达");
 
                 while(rclcpp::ok() && !navigation_complete_){
                     std::this_thread::sleep_for(100ms);
@@ -215,6 +225,33 @@ private:
         }
     }
 
+    void speechText(const std::string &text){
+        if(!speech_client_->wait_for_service(1s)){
+            RCLCPP_WARN(this->get_logger(), "语音服务不可用");
+            return;
+        }
+        
+        auto request = std::make_shared<SpeechText::Request>();
+        request->text = text;
+
+        auto future = speech_client_->async_send_request(
+            request,
+            [text, this](rclcpp::Client<SpeechText>::SharedFuture future){
+                try{
+                    auto response = future.get();
+                    if(response->result == true){
+                        RCLCPP_INFO(this->get_logger(), "语音播报成功：%s", text.c_str());
+                    }else{
+                        RCLCPP_ERROR(this->get_logger(), "语音播报失败");
+                    }
+                }catch(const std::exception &e){
+                    RCLCPP_ERROR(this->get_logger(), "服务调用异常：%s", e.what());
+                }
+            }
+        );
+
+    }
+
     std::vector<double> initial_point_;
     std::vector<double> target_points_;
     rclcpp::Publisher<PoseWithCovarianceStamped>::SharedPtr initial_pose_pub_;
@@ -226,6 +263,7 @@ private:
     rclcpp_action::ClientGoalHandle<NavigateToPose>::SharedPtr goal_handle_;
     rclcpp::Subscription<Clock>::SharedPtr clock_subsctition_;
     Clock clock_{};
+    rclcpp::Client<SpeechText>::SharedPtr speech_client_;
 };
 
 int main(int argc, char** argv){

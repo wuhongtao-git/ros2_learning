@@ -14,7 +14,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
-
+find_package(autopatrol_interfaces REQUIRED)
 
 add_executable(patrol_node
   src/patrol_node.cpp
@@ -25,10 +25,10 @@ add_executable(speaker_node
 )
 
 ament_target_dependencies(patrol_node 
-rclcpp rclcpp_action geometry_msgs tf2_geometry_msgs nav2_msgs tf2_ros rosgraph_msgs)
+rclcpp rclcpp_action geometry_msgs tf2_geometry_msgs nav2_msgs tf2_ros rosgraph_msgs autopatrol_interfaces)
 
 ament_target_dependencies(speaker_node 
-rclcpp)
+rclcpp autopatrol_interfaces)
 
 install(TARGETS patrol_node speaker_node
         DESTINATION lib/${PROJECT_NAME}
