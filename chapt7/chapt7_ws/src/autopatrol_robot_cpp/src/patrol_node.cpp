@@ -211,11 +211,11 @@ private:
 
                 navigateToPose(target_pose);
 
-                speechText("目标点已到达");
-
                 while(rclcpp::ok() && !navigation_complete_){
                     std::this_thread::sleep_for(100ms);
                 }
+
+                speechText("目标点已到达");
 
                 rclcpp::sleep_for(1s);
 

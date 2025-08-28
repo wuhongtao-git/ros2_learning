@@ -1,37 +1,65 @@
 #include "rclcpp/rclcpp.hpp"
 #include "autopatrol_interfaces/srv/speech_text.hpp"
+#include <cstdlib>
+#include <string>
+#include <cstring>
+#include <unistd.h>
 
-using SpeechText = autopatrol_interfaces::srv::SpeechText;
-
-using namespace std::placeholders;
-
-class Speaker : public rclcpp::Node{
+class SpeakerNode : public rclcpp::Node {
 public:
-    Speaker() : Node("speaker_node"){
-        RCLCPP_INFO(this->get_logger(), "语言节点启动");
-        speaker_service_ = this->create_service<SpeechText>(
+    SpeakerNode() : Node("speaker_node") {
+        // 检查 espeak-ng 是否可用
+        if (system("which espeak-ng > /dev/null 2>&1") != 0) {
+            RCLCPP_ERROR(this->get_logger(), "espeak-ng 未安装，语音服务不可用");
+            throw std::runtime_error("espeak-ng not installed");
+        }
+        
+        service_ = this->create_service<autopatrol_interfaces::srv::SpeechText>(
             "speech_text",
-            std::bind(&Speaker::handleSpeechRequest, this, _1, _2)
-        );
+            [this](const std::shared_ptr<autopatrol_interfaces::srv::SpeechText::Request> request,
+                   std::shared_ptr<autopatrol_interfaces::srv::SpeechText::Response> response) {
+                this->handleSpeechRequest(request, response);
+            });
+        
+        RCLCPP_INFO(this->get_logger(), "语音服务已启动（使用 espeak-ng 命令行）");
     }
-    ~Speaker(){
-
-    }
+    
 private:
     void handleSpeechRequest(
-    const std::shared_ptr<SpeechText::Request> request,
-          std::shared_ptr<SpeechText::Response> response){
-        RCLCPP_INFO(this->get_logger(), "播报：%s", request->text.c_str());
-
-        response->result = true;
+        const std::shared_ptr<autopatrol_interfaces::srv::SpeechText::Request> request,
+        std::shared_ptr<autopatrol_interfaces::srv::SpeechText::Response> response) {
+        
+        RCLCPP_INFO(this->get_logger(), "播报: %s", request->text.c_str());
+        
+        // 创建安全的命令行参数
+        std::string command = "espeak-ng -v zh \"";
+        for (char c : request->text) {
+            if (c == '"' || c == '`' || c == '$' || c == '\\' || c == ';') {
+                // 转义特殊字符
+                command += '\\';
+            }
+            command += c;
+        }
+        command += "\"";
+        
+        // 执行命令
+        int result = std::system(command.c_str());
+        
+        if (WIFEXITED(result) && WEXITSTATUS(result) == 0) {
+            RCLCPP_INFO(this->get_logger(), "语音播报成功");
+            response->result = true;
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "语音播报失败，返回码: %d", result);
+            response->result = false;
+        }
     }
-
-    rclcpp::Service<SpeechText>::SharedPtr speaker_service_;
+    
+    rclcpp::Service<autopatrol_interfaces::srv::SpeechText>::SharedPtr service_;
 };
 
-int main(int argc, char** argv){
+int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<Speaker>();
+    auto node = std::make_shared<SpeakerNode>();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
