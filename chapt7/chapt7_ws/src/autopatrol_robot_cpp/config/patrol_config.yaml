@@ -14,4 +14,4 @@ patrol_node:
       - 3.0
       - 0.0
       - 3.14
-    image_save_path: "/home/user/images/"
+    image_save_path: "/home/wht/code/pictures/"

@@ -53,11 +53,17 @@ def generate_launch_description():
         'launch', 'gazebo.launch.py'
     )
     
+    # 添加环境变量确保加载摄像头插件
+    if 'GAZEBO_PLUGIN_PATH' not in os.environ:
+        os.environ['GAZEBO_PLUGIN_PATH'] = ''
+    os.environ['GAZEBO_PLUGIN_PATH'] += ':/opt/ros/humble/lib'
+    
     launch_gazebo = launch.actions.IncludeLaunchDescription(
         PythonLaunchDescriptionSource([gazebo_launch_path]),
         launch_arguments={
             'world': default_world_path,
-            'verbose': 'true'
+            'verbose': 'true',
+            'extra_gazebo_args': '--ros-args -p libgazebo_ros_camera.so:1.0'  # 确保加载摄像头插件
         }.items()
     )
 
@@ -69,9 +75,20 @@ def generate_launch_description():
             '-topic', '/robot_description',
             '-entity', robot_name_in_model,
             '-z', '0.1'
-        ]
+        ],
+        parameters=[{'use_sim_time': True}]
     )
 
+    # 添加话题重映射节点 (将Gazebo的摄像头话题重映射到/camera/image_raw)
+    camera_remap_node = launch_ros.actions.Node(
+        package='topic_tools',
+        executable='relay',
+        name='camera_relay',
+        arguments=['/camera_sensor/image_raw', '/camera/image_raw'],  # 源话题和目标话题
+        parameters=[{'use_sim_time': True}]
+    )
+
+    # 加载控制器
     load_joint_state_controller = launch.actions.ExecuteProcess(
         cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'fishbot_joint_state_broadcaster'],
         output='screen'
@@ -94,15 +111,15 @@ def generate_launch_description():
                 on_exit=[load_joint_state_controller],
             )
         ),
-        # launch.actions.RegisterEventHandler(
-        #     event_handler=launch.event_handlers.OnProcessExit(
-        #         target_action=load_joint_state_controller,
-        #         on_exit=[load_fishbot_effort_controller],
-        #   )
-        # ),
         launch.actions.RegisterEventHandler(
             event_handler=launch.event_handlers.OnProcessExit(
                 target_action=load_joint_state_controller,
+                on_exit=[load_fishbot_effort_controller],
+          )
+        ),
+        launch.actions.RegisterEventHandler(
+            event_handler=launch.event_handlers.OnProcessExit(
+                target_action=load_fishbot_effort_controller,
                 on_exit=[load_fishbot_diff_drive_controller],
           )
         ),
@@ -110,4 +127,5 @@ def generate_launch_description():
         robot_state_pub_node,
         launch_gazebo,
         spawn_entity_node,
+        camera_remap_node  # 添加摄像头话题重映射节点
     ])

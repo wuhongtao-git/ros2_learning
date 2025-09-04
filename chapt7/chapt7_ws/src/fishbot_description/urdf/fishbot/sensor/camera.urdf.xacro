@@ -4,6 +4,32 @@
     <xacro:macro name="camera_xacro" params="xyz">
         <gazebo reference="camera_link">
             <material>Gazebo/Red</material>
+            <!-- 添加摄像头传感器插件 -->
+            <sensor type="camera" name="camera_sensor">
+                <update_rate>30.0</update_rate>
+                <camera name="camera">
+                    <horizontal_fov>1.3962634</horizontal_fov>  <!-- 80度视角 -->
+                    <image>
+                        <width>640</width>
+                        <height>480</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.1</near>
+                        <far>100</far>
+                    </clip>
+                </camera>
+                <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+                    <ros>
+                        <namespace>camera</namespace>
+                        <remapping>image_raw:=image_raw</remapping>
+                        <remapping>camera_info:=camera_info</remapping>
+                    </ros>
+                    <camera_name>camera</camera_name>
+                    <frame_name>camera_link</frame_name>
+                    <hack_baseline>0.07</hack_baseline>
+                </plugin>
+            </sensor>
         </gazebo>
         <link name="camera_link">
             <visual>
