@@ -19,6 +19,9 @@ find_package(nav2_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(autopatrol_interfaces REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
 
 # 添加可执行文件
 add_executable(patrol_node
@@ -39,6 +42,9 @@ ament_target_dependencies(patrol_node
   tf2_ros 
   rosgraph_msgs 
   autopatrol_interfaces
+  sensor_msgs
+  cv_bridge
+  OpenCV
 )
 
 ament_target_dependencies(speaker_node 

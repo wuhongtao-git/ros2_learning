@@ -8,11 +8,15 @@
 #include "tf2_ros/transform_listener.h"
 #include "rosgraph_msgs/msg/clock.hpp"
 #include "autopatrol_interfaces/srv/speech_text.hpp"
+#include "sensor_msgs/msg/image.hpp"
+#include <cv_bridge/cv_bridge.h>
+#include <opencv2/opencv.hpp>
 #include <chrono>
 #include <vector>
 #include <thread>
 #include <atomic>
 #include <future>
+#include <mutex>
 
 using namespace std::chrono_literals;
 
@@ -23,7 +27,7 @@ using NavigateToPose = nav2_msgs::action::NavigateToPose;
 using GoalHandleNavigate = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 using Clock = rosgraph_msgs::msg::Clock;
 using SpeechText = autopatrol_interfaces::srv::SpeechText;
-
+using Image = sensor_msgs::msg::Image;
 
 
 class PatrolNode : public rclcpp::Node{
@@ -33,10 +37,12 @@ public:
 
         this->declare_parameter<std::vector<double>>("initial_point", std::vector<double>{0.0, 0.0, 0.0});
         this->declare_parameter<std::vector<double>>("target_points", std::vector<double>{0.0, 0.0, 0.0, 0.0, 1.0, 1.57});
-        
+        this->declare_parameter<std::string>("image_save_path", "");
+
         this->initial_point_ = this->get_parameter("initial_point").as_double_array();
         this->target_points_ = this->get_parameter("target_points").as_double_array();
-    
+        this->image_save_path_ = this->get_parameter("image_save_path").as_string();
+
         this->initial_pose_pub_ = this->create_publisher<PoseWithCovarianceStamped>("/initialpose", 10);
         nav_action_client_ = rclcpp_action::create_client<NavigateToPose>(this, "navigate_to_pose");
     
@@ -44,6 +50,14 @@ public:
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
         speech_client_ = this->create_client<SpeechText>("speech_text");
+
+        image_sub_ = this->create_subscription<Image>(
+            "/camera/image_raw", 10,
+            [this](const Image::SharedPtr msg){
+                std::lock_guard<std::mutex> lock(image_mutex_);
+                latest_image_ = msg;
+            }
+        );
 
         rclcpp::QoS clock_qos(rclcpp::KeepLast(10));
         clock_qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT); // 匹配发布者
@@ -215,7 +229,9 @@ private:
                     std::this_thread::sleep_for(100ms);
                 }
 
-                speechText("目标点已到达");
+                speechText("目标点已到达，正在记录图像");
+                recordImage();
+                speechText("图像记录完成");
 
                 rclcpp::sleep_for(1s);
 
@@ -252,6 +268,39 @@ private:
 
     }
 
+    void recordImage(){
+        Image::SharedPtr image_copy;
+
+        {
+            std::lock_guard<std::mutex> lock(image_mutex_);
+            if(!latest_image_){
+                RCLCPP_WARN(this->get_logger(), "没有可用的图像");
+                return;
+            }
+            image_copy = latest_image_;
+        }
+
+        try{
+            cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(
+                image_copy, sensor_msgs::image_encodings::BGR8
+            );
+
+            auto pose = getCurrentPose();
+            double x = pose.translation.x;
+            double y = pose.translation.y;
+
+            char filename[256];
+            snprintf(filename, sizeof(filename), "%simage_%.2f_%.2f.png", image_save_path_.c_str(), x, y);
+            cv::imwrite(filename, cv_ptr->image);
+
+            RCLCPP_INFO(this->get_logger(), "图像已保存: %s", filename);
+        }catch (cv_bridge::Exception& e){
+            RCLCPP_ERROR(this->get_logger(), "图像转换错误: %s", e.what());
+        }catch(const std::exception& e){
+            RCLCPP_ERROR(this->get_logger(), "保存图像时发生错误: %s", e.what());
+        }
+    }
+
     std::vector<double> initial_point_;
     std::vector<double> target_points_;
     rclcpp::Publisher<PoseWithCovarianceStamped>::SharedPtr initial_pose_pub_;
@@ -264,6 +313,11 @@ private:
     rclcpp::Subscription<Clock>::SharedPtr clock_subsctition_;
     Clock clock_{};
     rclcpp::Client<SpeechText>::SharedPtr speech_client_;
+
+    std::string image_save_path_;
+    rclcpp::Subscription<Image>::SharedPtr image_sub_;
+    Image::SharedPtr latest_image_;
+    std::mutex image_mutex_;
 };
 
 int main(int argc, char** argv){
